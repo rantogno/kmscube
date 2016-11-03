@@ -114,7 +114,7 @@ static struct {
 	uint32_t connector_id;
 
 	int kms_in_fence_fd;
-	struct drm_out_fences kms_out_fence;
+	int kms_out_fence_fd;
 } drm;
 
 static drmModeEncoder *get_encoder_by_id(uint32_t id)
@@ -287,7 +287,7 @@ static int init_drm(void)
 	}
 
 	drm.kms_in_fence_fd = -1;
-	drm.kms_out_fence.fd = -1;
+	drm.kms_out_fence_fd = -1;
 
 	ret = drmSetClientCap(drm.fd, DRM_CLIENT_CAP_ATOMIC, 1);
 	if (ret) {
@@ -937,11 +937,11 @@ static int drm_atomic_commit(uint32_t fb_id, uint32_t flags)
 	add_plane_property(req, plane_id, "CRTC_H", drm.mode->vdisplay);
 
 	if (drm.kms_in_fence_fd != -1) {
-		drm.kms_out_fence.crtc_id = drm.crtc_id;
-		drmModeAtomicAddOutFences(req, &drm.kms_out_fence, 1);
 		add_plane_property(req, plane_id, "FENCE_FD", drm.kms_in_fence_fd);
+		add_crtc_property(req, drm.crtc_id, "OUT_FENCE_PTR", &drm.kms_out_fence_fd);
 	}
 
+	printf("--- FLAGS: 0x%x\n", flags);
 	ret = drmModeAtomicCommit(drm.fd, req, flags, NULL);
 	if (ret)
 		goto out;
@@ -1018,13 +1018,13 @@ int main(int argc, char *argv[])
 		EGLSyncKHR kms_fence = NULL;   /* in-fence to gpu, out-fence from kms */
 		int gpu_fence_fd, kms_fence_fd;  /* just for debugging */
 
-		kms_fence_fd = drm.kms_out_fence.fd;
+		kms_fence_fd = drm.kms_out_fence_fd;
 
-		if (drm.kms_out_fence.fd != -1) {
-			kms_fence = create_fence(drm.kms_out_fence.fd);
+		if (drm.kms_out_fence_fd != -1) {
+			kms_fence = create_fence(drm.kms_out_fence_fd);
 
 			/* driver now has ownership of the fence fd: */
-			drm.kms_out_fence.fd = -1;
+			drm.kms_out_fence_fd = -1;
 
 			/* wait "on the gpu" (ie. this won't necessarily block, but
 			 * will block the rendering until fence is signaled), until
@@ -1061,7 +1061,7 @@ int main(int argc, char *argv[])
 		 */
 		ret = drm_atomic_commit(fb->fb_id, DRM_MODE_ATOMIC_NONBLOCK);
 		printf("commit: gpu_fence_fd=%d, kms_fence_fd=%d, ret=%d\n",
-				gpu_fence_fd, kms_fence_fd, ret);
+				gpu_fence_fd, drm.kms_out_fence_fd, ret);
 		if (ret) {
 			printf("failed to commit: %s\n", strerror(errno));
 			return -1;
