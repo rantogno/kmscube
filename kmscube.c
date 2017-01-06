@@ -63,7 +63,7 @@ static struct {
 	PFNEGLCREATESYNCKHRPROC eglCreateSyncKHR;
 	PFNEGLDESTROYSYNCKHRPROC eglDestroySyncKHR;
 	PFNEGLWAITSYNCKHRPROC eglWaitSyncKHR;
-	PFNEGLWAITSYNCKHRPROC eglClientWaitSyncKHR;
+	PFNEGLCLIENTWAITSYNCKHRPROC eglClientWaitSyncKHR;
 	PFNEGLDUPNATIVEFENCEFDANDROIDPROC eglDupNativeFenceFDANDROID;
 } gl;
 
@@ -1090,7 +1090,8 @@ int main(int argc, char *argv[])
 			 * the buffer that is still on screen.
 			 */
 			/* gl.eglWaitSyncKHR(gl.display, kms_fence, 0); */
-			gl.eglClientWaitSyncKHR(gl.display, kms_fence, 0);
+			gl.eglClientWaitSyncKHR(gl.display, kms_fence,
+						/*flags*/ 0, /*timeout*/ EGL_FOREVER_KHR);
 			gl.eglDestroySyncKHR(gl.display, kms_fence);
 		}
 
