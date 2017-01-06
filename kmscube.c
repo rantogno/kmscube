@@ -268,7 +268,7 @@ static int init_drm(void)
 	static const char *modules[] = {
 			"i915", "radeon", "nouveau", "vmwgfx", "omapdrm", "exynos", "msm", "tegra", "virtio_gpu"
 	};
-	int i, area, ret;
+	int i, ret;
 
 	for (i = 0; i < ARRAY_SIZE(modules); i++) {
 		printf("trying to load module %s...", modules[i]);
@@ -746,7 +746,6 @@ static void
 drm_fb_destroy_callback(struct gbm_bo *bo, void *data)
 {
 	struct drm_fb *fb = data;
-	struct gbm_device *gbm = gbm_bo_get_device(bo);
 
 	if (fb->fb_id)
 		drmModeRmFB(drm.fd, fb->fb_id);
@@ -900,7 +899,6 @@ static int drm_atomic_commit(uint32_t fb_id, uint32_t flags)
 {
 	drmModeAtomicReq *req;
 	uint32_t blob_id;
-	unsigned int i;
 	int plane_id, ret;
 
 	req = drmModeAtomicAlloc();
@@ -1016,9 +1014,7 @@ int main(int argc, char *argv[])
 		struct gbm_bo *next_bo;
 		EGLSyncKHR gpu_fence = NULL;   /* out-fence from gpu, in-fence to kms */
 		EGLSyncKHR kms_fence = NULL;   /* in-fence to gpu, out-fence from kms */
-		int gpu_fence_fd, kms_fence_fd;  /* just for debugging */
-
-		kms_fence_fd = drm.kms_out_fence_fd;
+		int gpu_fence_fd;  /* just for debugging */
 
 		if (drm.kms_out_fence_fd != -1) {
 			kms_fence = create_fence(drm.kms_out_fence_fd);
