@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
+#include <getopt.h>
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -44,6 +45,10 @@
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
+/* Exit after rendering the given number of frames. If 0, then continue
+ * rendering forever.
+ */
+static uint64_t arg_frames = 0;
 
 static struct {
 	EGLDisplay display;
@@ -961,12 +966,70 @@ static EGLSyncKHR create_fence(int fd)
 	return fence;
 }
 
+static void
+print_help(void)
+{
+	printf("usage: kmscube [-h|--help] [-f|--frames <frames>]\n");
+}
+
+static void
+parse_args(int argc, char *argv[])
+{
+	static const struct option longopts[] = {
+		{ "help",       no_argument,            NULL, 'h' },
+		{ "frames",     required_argument,      NULL, 'f' },
+		{ 0 },
+	};
+
+	char *endptr;
+	int opt;
+	int longindex = 0;
+
+	/* Suppress getopt's poor error messages */
+	opterr = 0;
+
+	while ((opt = getopt_long(argc, argv, "+:hf:", longopts,
+				 /*longindex*/ &longindex)) != -1) {
+		switch (opt) {
+		case 'h':
+			print_help();
+			exit(0);
+			break;
+		case 'f':
+			errno = 0;
+			arg_frames = strtoul(optarg, &endptr, 0);
+			if (errno || *endptr != '\0') {
+				fprintf(stderr, "usage error: invalid value for <frames>\n");
+				exit(EXIT_FAILURE);
+			}
+			break;
+		case ':':
+			fprintf(stderr, "usage error: %s requires an argument\n", argv[optind - 1]);
+			exit(EXIT_FAILURE);
+			break;
+		case '?':
+		default:
+			assert(opt == '?');
+			fprintf(stderr, "usage error: unknown option '%s'\n", argv[optind - 1]);
+			exit(EXIT_FAILURE);
+			break;
+		}
+	}
+
+	if (optind < argc) {
+		fprintf(stderr, "usage error: trailing args\n");
+		exit(EXIT_FAILURE);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	struct gbm_bo *bo;
 	struct drm_fb *fb;
-	uint32_t i = 0;
+	uint64_t i = 0;
 	int ret;
+
+	parse_args(argc, argv);
 
 	ret = init_drm();
 	if (ret) {
@@ -1007,7 +1070,7 @@ int main(int argc, char *argv[])
 	int64_t gpu_fence_fd = -1; /* out-fence from gpu, in-fence to kms */
 	int64_t kms_fence_fd = -1; /* in-fence to gpu, out-fence from kms */
 
-	while (1) {
+	while (arg_frames == 0 || i < arg_frames) {
 		struct gbm_bo *next_bo;
 
 		EGLSyncKHR gpu_fence = NULL;   /* out-fence from gpu, in-fence to kms */
