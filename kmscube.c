@@ -1091,7 +1091,8 @@ int main(int argc, char *argv[])
 			 */
 			/* gl.eglWaitSyncKHR(gl.display, kms_fence, 0); */
 			gl.eglClientWaitSyncKHR(gl.display, kms_fence,
-						/*flags*/ 0, /*timeout*/ EGL_FOREVER_KHR);
+						/*flags*/ EGL_SYNC_FLUSH_COMMANDS_BIT_KHR,
+						/*timeout*/ EGL_FOREVER_KHR);
 			gl.eglDestroySyncKHR(gl.display, kms_fence);
 		}
 
