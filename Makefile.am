@@ -33,6 +33,8 @@ kmscube_LDADD = \
 	$(GLES2_LIBS)
 
 kmscube_CFLAGS = \
+	-Wall \
+	-Wshadow \
 	-O0 -g -lm \
 	$(DRM_CFLAGS) \
 	$(GBM_CFLAGS) \
