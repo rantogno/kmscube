@@ -938,7 +938,7 @@ static int drm_atomic_commit(uint32_t fb_id, uint32_t flags)
 
 	if (drm.kms_in_fence_fd != -1) {
 		add_plane_property(req, plane_id, "FENCE_FD", drm.kms_in_fence_fd);
-		add_crtc_property(req, drm.crtc_id, "OUT_FENCE_PTR", &drm.kms_out_fence_fd);
+		add_crtc_property(req, drm.crtc_id, "OUT_FENCE_PTR", (uintptr_t) &drm.kms_out_fence_fd);
 	}
 
 	printf("--- FLAGS: 0x%x\n", flags);
