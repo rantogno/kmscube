@@ -1049,6 +1049,11 @@ int main(int argc, char *argv[])
 		assert(drm.kms_in_fence_fd != -1);
 
 		next_bo = gbm_surface_lock_front_buffer(gbm.surface);
+		if (!next_bo) {
+			printf("gbm_surface_lock_front_buffer() failed\n");
+			return -1;
+		}
+
 		fb = drm_fb_get_from_bo(next_bo);
 
 		/*
