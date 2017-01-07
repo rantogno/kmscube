@@ -113,8 +113,12 @@ static struct {
 	uint32_t crtc_id;
 	uint32_t connector_id;
 
-	int kms_in_fence_fd;
-	int kms_out_fence_fd;
+	/* We use int64_t for fds instead of int to workaround a bug in the
+	 * kernel's API for OUT_FENCE_PTR, as of Linux 4.10-rc2. The
+	 * OUT_FENCE_PTR property must point to an int64_t.
+	 */
+	int64_t kms_in_fence_fd;
+	int64_t kms_out_fence_fd;
 } drm;
 
 static drmModeEncoder *get_encoder_by_id(uint32_t id)
@@ -1061,7 +1065,7 @@ int main(int argc, char *argv[])
 		 * hw composition
 		 */
 		ret = drm_atomic_commit(fb->fb_id, DRM_MODE_ATOMIC_NONBLOCK);
-		printf("commit: gpu_fence_fd=%d, kms_fence_fd=%d, ret=%d\n",
+		printf("commit: gpu_fence_fd=%d, kms_fence_fd=%ld, ret=%d\n",
 				gpu_fence_fd, drm.kms_out_fence_fd, ret);
 		if (ret) {
 			printf("failed to commit: %s\n", strerror(errno));
