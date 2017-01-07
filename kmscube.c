@@ -38,9 +38,11 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <gbm.h>
+#include <drm_fourcc.h>
 
 #include "esUtil.h"
 #include <EGL/eglext.h>
+#include <GLES2/gl2ext.h>
 
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
@@ -50,16 +52,26 @@
  */
 static uint64_t arg_frames = 0;
 
+struct frame {
+	struct gbm_bo *gbm_bo;
+	EGLImageKHR egl_image;
+	GLuint gl_renderbuffer;
+};
+
+static struct frame frames[2];
+
 static struct {
 	EGLDisplay display;
 	EGLConfig config;
 	EGLContext context;
-	EGLSurface surface;
+	GLuint fb;
 	GLuint program;
 	GLint modelviewmatrix, modelviewprojectionmatrix, normalmatrix;
 	GLuint vbo;
 	GLuint positionsoffset, colorsoffset, normalsoffset;
 
+	PFNGLEGLIMAGETARGETRENDERBUFFERSTORAGEOESPROC glEGLImageTargetRenderbufferStorageOES;
+	PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR;
 	PFNEGLCREATESYNCKHRPROC eglCreateSyncKHR;
 	PFNEGLDESTROYSYNCKHRPROC eglDestroySyncKHR;
 	PFNEGLWAITSYNCKHRPROC eglWaitSyncKHR;
@@ -69,7 +81,6 @@ static struct {
 
 static struct {
 	struct gbm_device *dev;
-	struct gbm_surface *surface;
 } gbm;
 
 struct drm_fb {
@@ -378,13 +389,8 @@ error:
 static int init_gbm(void)
 {
 	gbm.dev = gbm_create_device(drm.fd);
-
-	gbm.surface = gbm_surface_create(gbm.dev,
-			drm.mode->hdisplay, drm.mode->vdisplay,
-			GBM_FORMAT_XRGB8888,
-			GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
-	if (!gbm.surface) {
-		printf("failed to create gbm surface\n");
+	if (!gbm.dev) {
+		printf("failed to create gbm device\n");
 		return -1;
 	}
 
@@ -557,6 +563,8 @@ static int init_gl(void)
 		assert(gl.name); \
 	} while (0)
 
+	get_proc(glEGLImageTargetRenderbufferStorageOES);
+	get_proc(eglCreateImageKHR);
 	get_proc(eglCreateSyncKHR);
 	get_proc(eglDestroySyncKHR);
 	get_proc(eglWaitSyncKHR);
@@ -587,15 +595,10 @@ static int init_gl(void)
 		return -1;
 	}
 
-	gl.surface = eglCreateWindowSurface(gl.display, gl.config, gbm.surface, NULL);
-	if (gl.surface == EGL_NO_SURFACE) {
-		printf("failed to create egl surface\n");
-		return -1;
-	}
+	eglMakeCurrent(gl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, gl.context);
 
-	/* connect the context to the surface */
-	eglMakeCurrent(gl.display, gl.surface, gl.surface, gl.context);
-
+	glGenFramebuffers(1, &gl.fb);
+	glBindFramebuffer(GL_FRAMEBUFFER, gl.fb);
 
 	vertex_shader = glCreateShader(GL_VERTEX_SHADER);
 
@@ -691,6 +694,57 @@ static int init_gl(void)
 	glEnableVertexAttribArray(2);
 
 	return 0;
+}
+
+static void init_frames(void)
+{
+	const int width = drm.mode->hdisplay;
+	const int height = drm.mode->vdisplay;
+
+	for (int i = 0; i < ARRAY_SIZE(frames); ++i) {
+		struct frame *frame = &frames[i];
+
+		frame->gbm_bo = gbm_bo_create(gbm.dev, width, height,
+			GBM_FORMAT_XRGB8888,
+			GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+		if (!frame->gbm_bo) {
+			printf("failed to create gbm_bo\n");
+			exit(EXIT_FAILURE);
+		}
+
+		int gbm_bo_fd = gbm_bo_get_fd(frame->gbm_bo);
+		if (gbm_bo_fd == -1) {
+			printf("gbm_bo_get_fd() failed\n");
+			exit(EXIT_FAILURE);
+		}
+
+		const EGLint image_attrs[] = {
+			EGL_WIDTH,			width,
+			EGL_HEIGHT,			height,
+			EGL_LINUX_DRM_FOURCC_EXT,	DRM_FORMAT_XRGB8888,
+			EGL_DMA_BUF_PLANE0_FD_EXT,	gbm_bo_fd,
+			EGL_DMA_BUF_PLANE0_PITCH_EXT,	gbm_bo_get_stride(frame->gbm_bo),
+			EGL_DMA_BUF_PLANE0_OFFSET_EXT,	0,
+			EGL_NONE,
+		};
+
+		frame->egl_image = gl.eglCreateImageKHR(gl.display,
+			EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT,
+			(EGLClientBuffer) NULL, image_attrs);
+		if (!frame->egl_image) {
+			printf("failed to create EGLImage from gbm_bo\n");
+			exit(EXIT_FAILURE);
+		}
+
+		glGenRenderbuffers(1, &frame->gl_renderbuffer);
+		glBindRenderbuffer(GL_RENDERBUFFER, frame->gl_renderbuffer);
+		gl.glEGLImageTargetRenderbufferStorageOES(GL_RENDERBUFFER,
+							  frame->egl_image);
+		if (glGetError() != GL_NO_ERROR) {
+			printf("failed to create GL renderbuffer from EGLImage\n");
+			exit(EXIT_FAILURE);
+		}
+	}
 }
 
 static void draw(uint32_t i)
@@ -1026,9 +1080,7 @@ parse_args(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
-	struct gbm_bo *bo;
 	struct drm_fb *fb;
-	uint64_t i = 0;
 	int ret;
 
 	parse_args(argc, argv);
@@ -1051,12 +1103,15 @@ int main(int argc, char *argv[])
 		return ret;
 	}
 
+	init_frames();
+
 	/* clear the color buffer */
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+				  GL_RENDERBUFFER, frames[0].gl_renderbuffer);
 	glClearColor(0.5, 0.5, 0.5, 1.0);
 	glClear(GL_COLOR_BUFFER_BIT);
-	eglSwapBuffers(gl.display, gl.surface);
-	bo = gbm_surface_lock_front_buffer(gbm.surface);
-	fb = drm_fb_get_from_bo(bo);
+	glFinish();
+	fb = drm_fb_get_from_bo(frames[0].gbm_bo);
 
 	/* set mode: */
 	ret = drm_atomic_commit(fb->fb_id, DRM_MODE_ATOMIC_ALLOW_MODESET, -1, NULL);
@@ -1072,8 +1127,8 @@ int main(int argc, char *argv[])
 	int64_t gpu_fence_fd = -1; /* out-fence from gpu, in-fence to kms */
 	int64_t kms_fence_fd = -1; /* in-fence to gpu, out-fence from kms */
 
-	while (arg_frames == 0 || i < arg_frames) {
-		struct gbm_bo *next_bo;
+	for (uint64_t i = 1; arg_frames == 0 || i < arg_frames; ++i) {
+		struct frame *frame = &frames[i % ARRAY_SIZE(frames)];
 
 		EGLSyncKHR gpu_fence = NULL;   /* out-fence from gpu, in-fence to kms */
 		EGLSyncKHR kms_fence = NULL;   /* in-fence to gpu, out-fence from kms */
@@ -1096,29 +1151,17 @@ int main(int argc, char *argv[])
 			gl.eglDestroySyncKHR(gl.display, kms_fence);
 		}
 
-		draw(i++);
+		draw(i);
 
 		/* insert fence to be singled in cmdstream.. this fence will be
 		 * signaled when gpu rendering done
 		 */
 		gpu_fence = create_fence(EGL_NO_NATIVE_FENCE_FD_ANDROID);
-
-		eglSwapBuffers(gl.display, gl.surface);
-
-		/* after swapbuffers, gpu_fence should be flushed, so safe
-		 * to get fd:
-		 */
 		gpu_fence_fd = gl.eglDupNativeFenceFDANDROID(gl.display, gpu_fence);
 		gl.eglDestroySyncKHR(gl.display, gpu_fence);
 		assert(gpu_fence_fd != -1);
 
-		next_bo = gbm_surface_lock_front_buffer(gbm.surface);
-		if (!next_bo) {
-			printf("gbm_surface_lock_front_buffer() failed\n");
-			return -1;
-		}
-
-		fb = drm_fb_get_from_bo(next_bo);
+		fb = drm_fb_get_from_bo(frame->gbm_bo);
 
 		/*
 		 * Here you could also update drm plane layers if you want
@@ -1137,10 +1180,6 @@ int main(int argc, char *argv[])
 			close(gpu_fence_fd);
 			gpu_fence_fd = -1;
 		}
-
-		/* release last buffer to render on again: */
-		gbm_surface_release_buffer(gbm.surface, bo);
-		bo = next_bo;
 	}
 
 	return ret;
