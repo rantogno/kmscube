@@ -56,6 +56,7 @@ struct frame {
 	struct gbm_bo *gbm_bo;
 	EGLImageKHR egl_image;
 	GLuint gl_renderbuffer;
+	GLuint gl_framebuffer;
 };
 
 static struct frame frames[2];
@@ -64,7 +65,6 @@ static struct {
 	EGLDisplay display;
 	EGLConfig config;
 	EGLContext context;
-	GLuint fb;
 	GLuint program;
 	GLint modelviewmatrix, modelviewprojectionmatrix, normalmatrix;
 	GLuint vbo;
@@ -597,9 +597,6 @@ static int init_gl(void)
 
 	eglMakeCurrent(gl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, gl.context);
 
-	glGenFramebuffers(1, &gl.fb);
-	glBindFramebuffer(GL_FRAMEBUFFER, gl.fb);
-
 	vertex_shader = glCreateShader(GL_VERTEX_SHADER);
 
 	glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
@@ -742,6 +739,15 @@ static void init_frames(void)
 							  frame->egl_image);
 		if (glGetError() != GL_NO_ERROR) {
 			printf("failed to create GL renderbuffer from EGLImage\n");
+			exit(EXIT_FAILURE);
+		}
+
+		glGenFramebuffers(1, &frame->gl_framebuffer);
+		glBindFramebuffer(GL_FRAMEBUFFER, frame->gl_framebuffer);
+		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+					  GL_RENDERBUFFER, frame->gl_renderbuffer);
+		if (glGetError() != GL_NO_ERROR) {
+			printf("failed to create GL framebuffer\n");
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -1106,8 +1112,7 @@ int main(int argc, char *argv[])
 	init_frames();
 
 	/* clear the color buffer */
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-				  GL_RENDERBUFFER, frames[0].gl_renderbuffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, frames[0].gl_framebuffer);
 	glClearColor(0.5, 0.5, 0.5, 1.0);
 	glClear(GL_COLOR_BUFFER_BIT);
 	glFinish();
@@ -1151,6 +1156,7 @@ int main(int argc, char *argv[])
 			gl.eglDestroySyncKHR(gl.display, kms_fence);
 		}
 
+		glBindFramebuffer(GL_FRAMEBUFFER, frame->gl_framebuffer);
 		draw(i);
 
 		/* insert fence to be singled in cmdstream.. this fence will be
