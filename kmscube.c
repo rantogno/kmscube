@@ -44,6 +44,8 @@
 #include <EGL/eglext.h>
 #include <GLES2/gl2ext.h>
 
+#include <libsync.h>
+
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
@@ -1139,20 +1141,21 @@ int main(int argc, char *argv[])
 		EGLSyncKHR kms_fence = NULL;   /* in-fence to gpu, out-fence from kms */
 
 		if (kms_fence_fd != -1) {
-			kms_fence = create_fence(kms_fence_fd);
+			/*
+			 * gpu driver will own the fence once we use it to
+			 * create kms_fence, so we dup it here first because we
+			 * still need it for waiting before the next commit.
+			 */
+			int kms_fence_for_gpu = dup(kms_fence_fd);
 
-			/* driver now has ownership of the fence fd: */
-			kms_fence_fd = -1;
+			kms_fence = create_fence(kms_fence_for_gpu);
 
 			/* wait "on the gpu" (ie. this won't necessarily block, but
 			 * will block the rendering until fence is signaled), until
 			 * the previous pageflip completes so we don't render into
 			 * the buffer that is still on screen.
 			 */
-			/* gl.eglWaitSyncKHR(gl.display, kms_fence, 0); */
-			gl.eglClientWaitSyncKHR(gl.display, kms_fence,
-						/*flags*/ EGL_SYNC_FLUSH_COMMANDS_BIT_KHR,
-						/*timeout*/ EGL_FOREVER_KHR);
+			gl.eglWaitSyncKHR(gl.display, kms_fence, 0 /*flags*/);
 			gl.eglDestroySyncKHR(gl.display, kms_fence);
 		}
 
@@ -1168,6 +1171,21 @@ int main(int argc, char *argv[])
 		assert(gpu_fence_fd != -1);
 
 		fb = drm_fb_get_from_bo(frame->gbm_bo);
+
+		/*
+		 * Do not send another commit while the previous one hasn't
+		 * finished yet
+		 */
+		if (kms_fence_fd != -1) {
+			ret = sync_wait(kms_fence_fd, 1000);
+			close(kms_fence_fd);
+			kms_fence_fd = -1;
+			if (ret) {
+				printf("failed waiting to commit: %s\n",
+				       strerror(errno));
+				return -1;
+			}
+		}
 
 		/*
 		 * Here you could also update drm plane layers if you want
