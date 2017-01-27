@@ -956,7 +956,7 @@ static int get_primary_plane_id()
 }
 
 static int drm_atomic_commit(uint32_t fb_id, uint32_t flags,
-			     int64_t in_fence_fd, int64_t *out_fence_fd)
+			     int64_t in_fence_fd, int32_t *out_fence_fd)
 {
 	drmModeAtomicReq *req;
 	uint32_t blob_id;
@@ -1131,8 +1131,8 @@ int main(int argc, char *argv[])
 	 * kernel's API for OUT_FENCE_PTR, as of Linux 4.10-rc2. The
 	 * OUT_FENCE_PTR property must point to an int64_t.
 	 */
-	int64_t gpu_fence_fd = -1; /* out-fence from gpu, in-fence to kms */
-	int64_t kms_fence_fd = -1; /* in-fence to gpu, out-fence from kms */
+	int32_t gpu_fence_fd = -1; /* out-fence from gpu, in-fence to kms */
+	int32_t kms_fence_fd = -1; /* in-fence to gpu, out-fence from kms */
 
 	for (uint64_t i = 1; arg_frames == 0 || i < arg_frames; ++i) {
 		struct frame *frame = &frames[i % ARRAY_SIZE(frames)];
@@ -1193,7 +1193,7 @@ int main(int argc, char *argv[])
 		 */
 		ret = drm_atomic_commit(fb->fb_id, DRM_MODE_ATOMIC_NONBLOCK,
 					gpu_fence_fd, &kms_fence_fd);
-		printf("commit: gpu_fence_fd=%ld, kms_fence_fd=%ld, ret=%d\n",
+		printf("commit: gpu_fence_fd=%d, kms_fence_fd=%d, ret=%d\n",
 				gpu_fence_fd, kms_fence_fd, ret);
 		if (ret) {
 			printf("failed to commit: %s\n", strerror(errno));
