@@ -510,7 +510,7 @@ static int init_gl(void)
 	};
 
 	static const EGLint config_attribs[] = {
-		EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+		EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
 		EGL_RED_SIZE, 1,
 		EGL_GREEN_SIZE, 1,
 		EGL_BLUE_SIZE, 1,
