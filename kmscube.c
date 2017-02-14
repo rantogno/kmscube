@@ -44,7 +44,9 @@
 #include <EGL/eglext.h>
 #include <GLES2/gl2ext.h>
 
+#ifdef HAS_FENCES
 #include <libsync.h>
+#endif
 
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
@@ -955,8 +957,12 @@ static int get_primary_plane_id()
 	return -EINVAL;
 }
 
+#ifdef HAS_FENCES
 static int drm_atomic_commit(uint32_t fb_id, uint32_t flags,
 			     int64_t in_fence_fd, int32_t *out_fence_fd)
+#else
+static int drm_atomic_commit(uint32_t fb_id, uint32_t flags)
+#endif
 {
 	drmModeAtomicReq *req;
 	uint32_t blob_id;
@@ -995,6 +1001,7 @@ static int drm_atomic_commit(uint32_t fb_id, uint32_t flags,
 	add_plane_property(req, plane_id, "CRTC_W", drm.mode->hdisplay);
 	add_plane_property(req, plane_id, "CRTC_H", drm.mode->vdisplay);
 
+#ifdef HAS_FENCES
 	if (in_fence_fd != -1)
 		add_plane_property(req, plane_id, "FENCE_FD", in_fence_fd);
 
@@ -1002,6 +1009,7 @@ static int drm_atomic_commit(uint32_t fb_id, uint32_t flags,
 		add_crtc_property(req, drm.crtc_id, "OUT_FENCE_PTR",
 				  (uintptr_t) out_fence_fd);
 	}
+#endif
 
 	printf("--- FLAGS: 0x%x\n", flags);
 	ret = drmModeAtomicCommit(drm.fd, req, flags, NULL);
@@ -1018,6 +1026,7 @@ out:
 	return ret;
 }
 
+#ifdef HAS_FENCES
 static EGLSyncKHR create_fence(int fd)
 {
 	EGLint attrib_list[] = {
@@ -1029,6 +1038,7 @@ static EGLSyncKHR create_fence(int fd)
 	assert(fence);
 	return fence;
 }
+#endif
 
 static void
 print_help(void)
@@ -1121,22 +1131,29 @@ int main(int argc, char *argv[])
 	fb = drm_fb_get_from_bo(frames[0].gbm_bo);
 
 	/* set mode: */
+#ifdef HAS_FENCES
 	ret = drm_atomic_commit(fb->fb_id, DRM_MODE_ATOMIC_ALLOW_MODESET, -1, NULL);
+#else
+	ret = drm_atomic_commit(fb->fb_id, DRM_MODE_ATOMIC_ALLOW_MODESET);
+#endif
 	if (ret) {
 		printf("failed to commit modeset: %s\n", strerror(errno));
 		return ret;
 	}
 
+#ifdef HAS_FENCES
 	/* We use int64_t for fds instead of int to workaround a bug in the
 	 * kernel's API for OUT_FENCE_PTR, as of Linux 4.10-rc2. The
 	 * OUT_FENCE_PTR property must point to an int64_t.
 	 */
 	int32_t gpu_fence_fd = -1; /* out-fence from gpu, in-fence to kms */
 	int32_t kms_fence_fd = -1; /* in-fence to gpu, out-fence from kms */
+#endif
 
 	for (uint64_t i = 1; arg_frames == 0 || i < arg_frames; ++i) {
 		struct frame *frame = &frames[i % ARRAY_SIZE(frames)];
 
+#ifdef HAS_FENCES
 		EGLSyncKHR gpu_fence = NULL;   /* out-fence from gpu, in-fence to kms */
 		EGLSyncKHR kms_fence = NULL;   /* in-fence to gpu, out-fence from kms */
 
@@ -1158,10 +1175,12 @@ int main(int argc, char *argv[])
 			gl.eglWaitSyncKHR(gl.display, kms_fence, 0 /*flags*/);
 			gl.eglDestroySyncKHR(gl.display, kms_fence);
 		}
+#endif
 
 		glBindFramebuffer(GL_FRAMEBUFFER, frame->gl_framebuffer);
 		draw(i);
 
+#ifdef HAS_FENCES
 		/* insert fence to be singled in cmdstream.. this fence will be
 		 * signaled when gpu rendering done
 		 */
@@ -1169,9 +1188,13 @@ int main(int argc, char *argv[])
 		gpu_fence_fd = gl.eglDupNativeFenceFDANDROID(gl.display, gpu_fence);
 		gl.eglDestroySyncKHR(gl.display, gpu_fence);
 		assert(gpu_fence_fd != -1);
+#else
+		glFinish();
+#endif
 
 		fb = drm_fb_get_from_bo(frame->gbm_bo);
 
+#ifdef HAS_FENCES
 		/*
 		 * Do not send another commit while the previous one hasn't
 		 * finished yet
@@ -1195,15 +1218,21 @@ int main(int argc, char *argv[])
 					gpu_fence_fd, &kms_fence_fd);
 		printf("commit: gpu_fence_fd=%d, kms_fence_fd=%d, ret=%d\n",
 				gpu_fence_fd, kms_fence_fd, ret);
+#else
+		ret = drm_atomic_commit(fb->fb_id, 0);
+		printf("commit: ret=%d\n", ret);
+#endif
 		if (ret) {
 			printf("failed to commit: %s\n", strerror(errno));
 			return -1;
 		}
 
+#ifdef HAS_FENCES
 		if (gpu_fence_fd != -1) {
 			close(gpu_fence_fd);
 			gpu_fence_fd = -1;
 		}
+#endif
 	}
 
 	return ret;
