@@ -166,7 +166,7 @@ static int prepare_connector()
 	drmModeEncoder *encoder;
 	uint32_t possible_crtcs = ~0;
 	uint32_t active_crtcs = 0;
-	unsigned int crtc_idx, idx, i, area;
+	int crtc_idx, idx, i, area;
 
 	for (i = 0; i < drm.res->count_connectors; i++) {
 		connector = drm.connectors[i].connector;
