@@ -66,6 +66,15 @@ AC_DEFUN([LIBDRM_CC_TRY_FLAG], [
 	AC_MSG_RESULT([$libdrm_cc_flag])
 ])
 
+AC_ARG_ENABLE([fences],
+[  --enable-fences    Enable explicit fences],
+[case "${enableval}" in
+  yes) fences=true ;;
+  no)  fences=false ;;
+  *) AC_MSG_ERROR([bad value ${enableval} for --enable-fences]) ;;
+esac],[debug=false])
+AM_CONDITIONAL([FENCES], [test x$fences = xtrue])
+
 MAYBE_WARN="-Wall -Wextra -Wno-packed-bitfield-compat \
 -Wsign-compare -Werror-implicit-function-declaration \
 -Wpointer-arith -Wwrite-strings -Wstrict-prototypes \

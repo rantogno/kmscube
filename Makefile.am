@@ -41,6 +41,10 @@ kmscube_CFLAGS = \
 	$(EGL_CFLAGS) \
 	$(GLES2_CFLAGS)
 
+if FENCES
+kmscube_CFLAGS += -DHAS_FENCES
+endif
+
 kmscube_SOURCES = \
 	kmscube.c \
 	esTransform.c
